@@ -1,0 +1,270 @@
+name: Build Virtio GPU Drivers with ARM64 Support
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      download_vulkan_lvp:
+        description: 'Download Vulkan LVP binaries'
+        type: boolean
+        default: false
+        required: false
+      build_arm64:
+        description: 'Build ARM64 drivers'
+        type: boolean
+        default: true
+        required: false
+      mesa_repo_url:
+        description: 'Custom Mesa repository URL (base URL for release assets). Leave empty to use default.'
+        type: string
+        default: ''
+        required: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    env:
+      MESA_REPO_URL: ${{ github.event.inputs.mesa_repo_url || 'https://github.com/YWFhYmJi/virtio-win-mesa/releases/latest/download' }}
+      DOWNLOAD_VULKAN_LVP: ${{ github.event.inputs.download_vulkan_lvp || 'false' }}
+      BUILD_ARM64: ${{ github.event.inputs.build_arm64 || 'true' }}
+      RELEASE_TAG: viogpu3d-${{ github.run_number }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Visual Studio 2022
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Download prebuilt Mesa binaries
+      shell: powershell
+      run: |
+        $repoUrl = $env:MESA_REPO_URL.Trim().TrimEnd('/')
+        $downloadVulkanLvp = $env:DOWNLOAD_VULKAN_LVP -eq 'true'
+        $buildArm64 = $env:BUILD_ARM64 -ne 'false'
+
+        # Resolve the actual Mesa release page URL (used in release notes).
+        # - If the base URL already points to a specific tag, rewrite it.
+        # - If it uses /releases/latest/download, resolve the actual tag via
+        #   a HEAD request (without following redirects) and read Location.
+        $mesaReleaseUrl = $repoUrl
+        if ($repoUrl -match '^(https://[^/]+/[^/]+/[^/]+)/releases/download/([^/]+)') {
+          $mesaReleaseUrl = "$($Matches[1])/releases/tag/$($Matches[2])"
+        } elseif ($repoUrl -match '/releases/latest/download$') {
+          try {
+            $headers = & curl.exe -sI "$repoUrl/mesa_x64_x86.7z"
+            $location = $null
+            foreach ($line in $headers) {
+              if ($line -match '^[Ll]ocation:\s*(\S+)') { $location = $Matches[1]; break }
+            }
+            if ($location -and $location -match '^(https://[^/]+/[^/]+/[^/]+)/releases/download/([^/]+)/') {
+              $mesaReleaseUrl = "$($Matches[1])/releases/tag/$($Matches[2])"
+            } else {
+              Write-Warning "Could not resolve Mesa tag from redirect, falling back to $mesaReleaseUrl"
+            }
+          } catch {
+            Write-Warning "Failed to resolve Mesa release URL: $_"
+          } finally {
+            $global:LASTEXITCODE = 0
+          }
+        }
+        Write-Host "Mesa release URL: $mesaReleaseUrl"
+        Add-Content -Path $env:GITHUB_ENV -Value "MESA_RELEASE_URL=$mesaReleaseUrl"
+
+        # Always download x64/x86 Mesa
+        curl "$repoUrl/mesa_x64_x86.7z" -O mesa_x64_x86.7z
+        7z x -o"$PWD\mesa_prebuilt" mesa_x64_x86.7z
+
+        # Optionally download x64/x86 Vulkan LVP (failures are ignored)
+        if ($downloadVulkanLvp) {
+          $lvpX64x86 = "vulkan_lvp_x64_x86.7z"
+          try {
+            curl "$repoUrl/$lvpX64x86" -O $lvpX64x86
+            if (Test-Path $lvpX64x86) {
+              7z x -o"$PWD\mesa_prebuilt" $lvpX64x86
+              if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Failed to extract $lvpX64x86, ignoring."
+              }
+            } else {
+              Write-Warning "Failed to download $lvpX64x86, ignoring."
+            }
+          } catch {
+            Write-Warning "Failed to download $lvpX64x86, ignoring: $_"
+          } finally {
+            $global:LASTEXITCODE = 0
+          }
+        }
+
+        # Optionally download ARM64 Mesa (only needed when building ARM64)
+        if ($buildArm64) {
+          curl "$repoUrl/mesa_arm64.7z" -O mesa_arm64.7z
+          7z x -o"$PWD\mesa_prebuilt" mesa_arm64.7z
+
+          if ($downloadVulkanLvp) {
+            $lvpArm64 = "vulkan_lvp_arm64.7z"
+            try {
+              curl "$repoUrl/$lvpArm64" -O $lvpArm64
+              if (Test-Path $lvpArm64) {
+                7z x -o"$PWD\mesa_prebuilt" $lvpArm64
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Warning "Failed to extract $lvpArm64, ignoring."
+                }
+              } else {
+                Write-Warning "Failed to download $lvpArm64, ignoring."
+              }
+            } catch {
+              Write-Warning "Failed to download $lvpArm64, ignoring: $_"
+            } finally {
+              $global:LASTEXITCODE = 0
+            }
+          }
+        }
+
+    - name: Build drivers
+      shell: powershell
+      run: |
+        $env:MESA_PREFIX_x64 = "$PWD\mesa_prebuilt\mesa_prefix_x64"
+        $env:MESA_PREFIX_x86 = "$PWD\mesa_prebuilt\mesa_prefix_x86"
+        $env:MESA_PREFIX_ARM64 = "$PWD\mesa_prebuilt\mesa_prefix_arm64"
+
+        if ($env:BUILD_ARM64 -eq 'false') {
+          $env:VIRTIO_WIN_NO_ARM = "1"
+        }
+
+        cd viogpu
+        .\build_AllNoSdv.bat
+
+    - name: Test sign
+      shell: powershell
+      run: |
+        .\.github\workflows\testsign.bat "$PWD\viogpu\Install\Win10\amd64" "$PWD\build\VirtIOTestCert.pfx"
+        if ($env:BUILD_ARM64 -ne 'false') {
+          .\.github\workflows\testsign.bat "$PWD\viogpu\Install\Win10\ARM64" "$PWD\build\VirtIOTestCert.pfx"
+        }
+
+    - name: Upload artifact (x64)
+      uses: actions/upload-artifact@v4
+      with:
+        name: viogpu_x64_build
+        path: viogpu\Install\Win10\amd64
+
+    - name: Upload artifact (x86)
+      uses: actions/upload-artifact@v4
+      with:
+        name: viogpu_x86_build
+        path: viogpu\Install\Win10\x86
+        if-no-files-found: warn
+
+    - name: Upload artifact (ARM64)
+      if: ${{ env.BUILD_ARM64 != 'false' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: viogpu_arm64_build
+        path: viogpu\Install\Win10\ARM64
+
+    - name: Package drivers
+      shell: powershell
+      run: |
+        $ErrorActionPreference = 'Stop'
+
+        # Certificate produced by the build
+        $certSrc = Join-Path $PWD 'build\VirtIOTestCert.cer'
+        if (-not (Test-Path $certSrc)) {
+          Write-Error "VirtIOTestCert.cer not found at $certSrc."
+          exit 1
+        }
+
+        $archMap = [ordered]@{
+          'x64'   = 'viogpu\Install\Win10\amd64'
+          'x86'   = 'viogpu\Install\Win10\x86'
+          'arm64' = 'viogpu\Install\Win10\ARM64'
+        }
+
+        $stageRoot = Join-Path $PWD 'staging'
+        if (Test-Path $stageRoot) { Remove-Item -Recurse -Force $stageRoot }
+        New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
+
+        foreach ($arch in $archMap.Keys) {
+          $srcDir = Join-Path $PWD $archMap[$arch]
+          if (-not (Test-Path $srcDir)) {
+            Write-Warning "Driver directory for $arch not found at $srcDir, skipping."
+            continue
+          }
+
+          $items = Get-ChildItem -Path $srcDir -Force
+          if ($items.Count -eq 0) {
+            Write-Warning "Driver directory for $arch is empty, skipping."
+            continue
+          }
+
+          $stageDir = Join-Path $stageRoot "viogpu3d_$arch"
+          New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+          $items | Copy-Item -Destination $stageDir -Recurse -Force
+          Copy-Item -Force -Path $certSrc -Destination (Join-Path $stageDir 'VirtIOTestCert.cer')
+
+          $archivePath = Join-Path $PWD "viogpu3d_$arch.7z"
+          Remove-Item -Force -ErrorAction SilentlyContinue $archivePath
+
+          Push-Location $stageRoot
+          try {
+            & 7z.exe a $archivePath "viogpu3d_$arch"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
+          Write-Host "Created viogpu3d_$arch.7z"
+        }
+
+        $archives = Get-ChildItem -Path $PWD -Filter "viogpu3d_*.7z" -File
+        $archives | Format-Table Name, Length
+        if ($archives.Count -eq 0) {
+          Write-Error "No viogpu3d archive was created."
+          exit 1
+        }
+
+    - name: Publish to GitHub Release
+      shell: powershell
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $tag  = $env:RELEASE_TAG
+        $repo = "${{ github.repository }}"
+
+        $mesaReleaseUrl = $env:MESA_RELEASE_URL
+        if (-not $mesaReleaseUrl) { $mesaReleaseUrl = $env:MESA_REPO_URL }
+        $notes = "Yttrium VirtIO GPU 3D driver build.`n`nMesa binaries: $mesaReleaseUrl"
+
+        $files = @()
+        Get-ChildItem -Path $PWD -Filter "viogpu3d_*.7z" -File | ForEach-Object { $files += $_.FullName }
+
+        if ($files.Count -eq 0) {
+          Write-Error "No release files found."
+          exit 1
+        }
+
+        Write-Host "Release tag  : $tag"
+        Write-Host "Release files:"
+        $files | ForEach-Object { Write-Host "  $_" }
+
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        gh release view $tag -R $repo 2>&1 | Out-Null
+        $exists = ($LASTEXITCODE -eq 0)
+        $ErrorActionPreference = $prevEAP
+
+        if ($exists) {
+          Write-Host "Release $tag exists, updating notes and uploading with --clobber"
+          gh release edit $tag --notes $notes -R $repo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release upload $tag $files --clobber -R $repo
+        } else {
+          Write-Host "Creating release $tag"
+          gh release create $tag $files --title $tag --notes $notes -R $repo
+        }
+
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
