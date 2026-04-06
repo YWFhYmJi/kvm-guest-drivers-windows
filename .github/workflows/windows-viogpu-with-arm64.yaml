@@ -1,0 +1,64 @@
+name: Build Virtio GPU Drivers with ARM64 Support
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Visual Studio 2022
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Download prebuilt Mesa binaries
+      shell: powershell
+      run: |
+        curl https://github.com/YWFhYmJi/virtio-win-mesa/releases/latest/download/mesa_x64_x86.7z -O mesa_x64_x86.7z
+        curl https://github.com/YWFhYmJi/virtio-win-mesa/releases/latest/download/vulkan_lvp_x64_x86.7z -O vulkan_lvp_x64_x86.7z
+        7z x -o"$PWD\mesa_prebuilt" mesa_x64_x86.7z
+        7z x -o"$PWD\mesa_prebuilt" vulkan_lvp_x64_x86.7z
+        curl https://github.com/YWFhYmJi/virtio-win-mesa/releases/latest/download/mesa_arm64.7z -O mesa_arm64.7z
+        curl https://github.com/YWFhYmJi/virtio-win-mesa/releases/latest/download/vulkan_lvp_arm64.7z -O vulkan_lvp_arm64.7z
+        7z x -o"$PWD\mesa_prebuilt" mesa_arm64.7z
+        7z x -o"$PWD\mesa_prebuilt" vulkan_lvp_arm64.7z
+
+    - name: Build drivers
+      shell: powershell
+      run: |
+        $env:MESA_PREFIX_x64 = "$PWD\mesa_prebuilt\mesa_prefix_x64"
+        $env:MESA_PREFIX_x86 = "$PWD\mesa_prebuilt\mesa_prefix_x86"
+        $env:MESA_PREFIX_ARM64 = "$PWD\mesa_prebuilt\mesa_prefix_arm64"
+        cd viogpu
+        .\build_AllNoSdv.bat
+
+    - name: Test sign
+      shell: powershell
+      run: |
+        .\.github\workflows\testsign.bat "$PWD\viogpu\Install\Win10\amd64" "$PWD\build\VirtIOTestCert.pfx"
+        .\.github\workflows\testsign.bat "$PWD\viogpu\Install\Win10\ARM64" "$PWD\build\VirtIOTestCert.pfx"
+
+    - name: Upload artifact (x64)
+      uses: actions/upload-artifact@v4
+      with:
+        name: viogpu_x64_build
+        path: viogpu\Install\Win10\amd64
+
+    - name: Upload artifact (x86)
+      uses: actions/upload-artifact@v4
+      with:
+        name: viogpu_x86_build
+        path: viogpu\Install\Win10\x86
+
+    - name: Upload artifact (ARM64)
+      uses: actions/upload-artifact@v4
+      with:
+        name: viogpu_arm64_build
+        path: viogpu\Install\Win10\ARM64
