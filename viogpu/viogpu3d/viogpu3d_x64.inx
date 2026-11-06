@@ -18,9 +18,9 @@ PnpLockdown     = 1
 [DestinationDirs]
 VioGpu3D_Files.Driver = 13 ; driver store
 VioGpu3D_Files.Resolution = 13 ; keep the service and its helper together
-VioGpu3D_Files.Usermode = 11 ; system32
+VioGpu3D_Files.Usermode = 13,x64 ; usermode driver (viogpu_d3d10)
 VioGpu3D_Files.Yttrium12 = 13,x64 ; private UMD and translator dependencies
-VioGpu3D_Files.Vulkan = 11 ; system32
+VioGpu3D_Files.Vulkan = 13,x64 ; vulkan driver
 
 [SourceDisksNames]
 1 = %DiskId1%,,,""
@@ -33,11 +33,7 @@ viogpu_d3d10_x64.dll = 1,x64,
 yttrium12.dll = 1,x64,
 d3d11on12.dll = 1,x64,
 viogpu_wgl_x64.dll = 1,x64,
-libEGL_x64.dll = 1,x64,
-libGLESv1_CM_x64.dll = 1,x64,
-libGLESv2_x64.dll = 1,x64,
 libvulkan_virtio_x64.dll = 1,x64,
-opengl32_x64.dll = 1,x64,
 vulkan_lvp_x64.dll = 1,x64,
 lvp_icd.x86_64.json = 1,x64,
 virtio_icd.x86_64.json = 1,x64,
@@ -53,19 +49,15 @@ vgpusrv.exe,,,0
 viogpuap.exe,,,0
 
 [VioGpu3D_Files.Usermode]
-viogpu_d3d10.dll,viogpu_d3d10_x64.dll,,0
-viogpu_wgl.dll,viogpu_wgl_x64.dll,,0
-libEGL.dll,libEGL_x64.dll,,0
-libGLESv1_CM.dll,libGLESv1_CM_x64.dll,,0
-libGLESv2.dll,libGLESv2_x64.dll,,0
-opengl32.dll,opengl32_x64.dll,,0
+viogpu_d3d10_x64.dll,,,0
+viogpu_wgl_x64.dll,,,0
 [VioGpu3D_Files.Yttrium12]
 yttrium12.dll,,,0
 d3d11on12.dll,,,0
 
 [VioGpu3D_Files.Vulkan]
-libvulkan_virtio.dll,libvulkan_virtio_x64.dll,,0
-vulkan_lvp.dll,vulkan_lvp_x64.dll,,0
+libvulkan_virtio_x64.dll,,,0
+vulkan_lvp_x64.dll,,,0
 lvp_icd.x86_64.json,,,0
 virtio_icd.x86_64.json,,,0
 [VioGpu3D_Inst.NT]
@@ -105,16 +97,14 @@ HKR,, HWCursor,                    %REG_DWORD%, 0
 HKR,, FlexResolution,              %REG_DWORD%, 1
 HKR,, UsePhysicalMemory,           %REG_DWORD%, 0
 ; KMTUMDVERSION_DX12 is slot 3; preserve the existing DX9/DX10/DX11 UMDs.
-HKR,, UserModeDriverName,          %REG_MULTI_SZ%, %11%\viogpu_d3d10.dll,%11%\viogpu_d3d10.dll,%11%\viogpu_d3d10.dll,%13%\x64\yttrium12.dll
-HKR,, OpenGLDriverName,            %REG_MULTI_SZ%, %11%\viogpu_wgl.dll
+HKR,, UserModeDriverName,          %REG_MULTI_SZ%, %13%\x64\viogpu_d3d10_x64.dll,%13%\x64\viogpu_d3d10_x64.dll,%13%\x64\viogpu_d3d10_x64.dll,%13%\x64\yttrium12.dll
+HKR,, OpenGLDriverName,            %REG_MULTI_SZ%, %13%\x64\viogpu_wgl_x64.dll
 HKR,, OpenGLFlags,                 %REG_DWORD%, 3
 HKR,, OpenGLVersion,               %REG_DWORD%, 4096
-HKR,, InstalledDisplayDrivers,     %REG_MULTI_SZ%, viogpu_d3d10,viogpu_d3d10,viogpu_d3d10,yttrium12
+HKR,, InstalledDisplayDrivers,     %REG_MULTI_SZ%, viogpu_d3d10_x64,viogpu_d3d10_x64,viogpu_d3d10_x64,yttrium12
+HKR,, VulkanDriverName,            %REG_MULTI_SZ%, %13%\x64\virtio_icd.x86_64.json,%13%\x64\lvp_icd.x86_64.json
 
 
-HKLM,"SOFTWARE\Khronos\Vulkan\Drivers","%11%\lvp_icd.x86_64.json",%REG_DWORD%,0
-HKLM,"SOFTWARE\Khronos\Vulkan\Drivers","%11%\virtio_icd.x86_64.json",%REG_DWORD%,0
-HKLM,"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Scheduler",EnablePreemption,%REG_DWORD%,1
 HKLM,"SYSTEM\CurrentControlSet\Control\GraphicsDrivers",TdrDebugMode,%REG_DWORD%,1
 
 [VioGpu3D_PCI_MSIX]

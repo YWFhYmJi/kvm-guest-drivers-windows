@@ -43,18 +43,21 @@ switch ($MesaArch) {
       @{ Name = 'virtio_icd.x86_64.json'; Legacy = @(); Dll = 'libvulkan_virtio.dll'; Optional = $false },
       @{ Name = 'lvp_icd.x86_64.json'; Legacy = @(); Dll = 'vulkan_lvp.dll'; Optional = $true }
     )
+    $archSuffix = '_x64'
   }
   'aarch64' {
     $icdFiles = @(
       @{ Name = 'virtio_icd.aarch64.json'; Legacy = @(); Dll = 'libvulkan_virtio.dll'; Optional = $false },
       @{ Name = 'lvp_icd.aarch64.json'; Legacy = @(); Dll = 'vulkan_lvp.dll'; Optional = $true }
     )
+    $archSuffix = '_arm64'
   }
   'x86' {
     $icdFiles = @(
       @{ Name = 'virtio_icd.x86.json'; Legacy = @('virtio_icd.i686.json'); Dll = 'libvulkan_virtio.dll'; Optional = $false },
       @{ Name = 'lvp_icd.x86.json'; Legacy = @('lvp_icd.i686.json'); Dll = 'vulkan_lvp.dll'; Optional = $true }
     )
+    $archSuffix = '_x86'
   }
   default {
     throw "Unsupported MesaArch: $MesaArch"
@@ -97,7 +100,7 @@ foreach ($icd in $icdFiles) {
     throw "Invalid ICD JSON (missing ICD object): $src"
   }
 
-  $obj.ICD.library_path = $icd.Dll
+  $obj.ICD.library_path = '.\' + [IO.Path]::GetFileNameWithoutExtension($icd.Dll) + $archSuffix + '.dll'
   $json = $obj | ConvertTo-Json -Depth 10
   [System.IO.File]::WriteAllText($dst, $json, $utf8NoBom)
 }

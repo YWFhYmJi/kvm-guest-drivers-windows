@@ -101,21 +101,27 @@ $nativeTokens = switch -Wildcard ($sourceName) {
 }
 
 $removeTokens = @()
+$lines = [System.IO.File]::ReadAllLines($SourcePath)
 $nativeLvpPresent = -not [string]::IsNullOrWhiteSpace($NativeLvpPath) -and
   (Test-Path -LiteralPath $NativeLvpPath)
 if (-not $nativeLvpPresent) {
+  # Drop the optional lvp slot
+  $lines = $lines -replace ',%13%\\x64\\lvp_icd\.x86_64\.json\s*$', ''
+  $lines = $lines -replace ',%13%\\arm64\\lvp_icd\.aarch64\.json\s*$', ''
+  $lines = $lines -replace ',%13%\\x86\\lvp_icd\.x86\.json\s*$', ''
   $removeTokens += $nativeTokens
 }
 
 $hasWow64Payload = $sourceName -like '*_wow64.inx'
-$wow64LvpPresent = $hasWow64Payload -and
+$wow64LvpPresent = $nativeLvpPresent -and $hasWow64Payload -and
   -not [string]::IsNullOrWhiteSpace($Wow64LvpPath) -and
   (Test-Path -LiteralPath $Wow64LvpPath)
 if ($hasWow64Payload -and -not $wow64LvpPresent) {
+  # Drop the optional lvp slot
+  $lines = $lines -replace ',%13%\\x86\\lvp_icd\.x86\.json\s*$', ''
   $removeTokens += @('vulkan_lvp_x86.dll', 'lvp_icd.x86.json')
 }
 
-$lines = [System.IO.File]::ReadAllLines($SourcePath)
 if (-not $yttrium12Present) {
   # Drop the optional DX12 slot without removing the DX9/DX10/DX11 entries
   # on the same registry lines. The remaining matches are file entries.
